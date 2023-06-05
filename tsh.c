@@ -3,6 +3,7 @@
  * 
  * <Put your name and login ID here>
  */
+#include <asm-generic/errno-base.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include "csapp.h"
 
 /* Misc manifest constants */
 #define MAXLINE    1024   /* max line size */
@@ -165,6 +167,49 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char *argv[MAXARGS];
+    char buf[MAXLINE];
+    int bg;  // Whether this job is bg or not
+    pid_t pid;
+
+    strcpy(buf, cmdline);
+    bg = parseline(buf, argv);
+    parseline(buf, argv);
+    if (argv[0] == NULL) {
+        // Ignore empty lines
+        return;
+    }
+
+    sigset_t mask, prev_mask;
+    Sigemptyset(&mask);
+    Sigaddset(&mask, SIGCLD);
+
+    if (!builtin_cmd(argv)) {
+        // Not builtin cmd
+        // First block sig child signal
+        Sigprocmask(SIG_BLOCK, &mask, &prev_mask);
+        if ((pid = Fork()) == 0) {
+            // Now we can unblock the sig child signal
+            Sigprocmask(SIG_SETMASK, &prev_mask, NULL);
+            // Execute in child process
+            Execve(argv[0], argv, environ);
+        }
+
+        int state = bg ? BG : FG;
+        addjob(jobs, pid, state, cmdline);
+
+        if (!bg) {
+            waitfg(pid);
+
+        } else {
+            printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
+        }
+
+
+        // Now we can unblock the sig child signal
+        Sigprocmask(SIG_SETMASK, &prev_mask, NULL);
+
+    }
     return;
 }
 
@@ -231,8 +276,21 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    if (strcmp(argv[0], "quit") == 0) {
+        exit(0);
+    } else if (strcmp(argv[0], "jobs") == 0) {
+        listjobs(jobs);
+        return 1;
+    } else if (strcmp(argv[0], "bg") == 0) {
+        return 1;
 
-    return 0;     /* not a builtin command */
+    } else if (strcmp(argv[0], "fg") == 0) {
+        return 1;
+
+    } else {
+
+        return 0;     /* not a builtin command */
+    }
 }
 
 /* 
@@ -248,6 +306,11 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    // sigset_t mask;
+    // Sigemptyset(&mask);
+    // Sigsuspend(&mask);
+    Waitpid(pid, NULL, 0);
+    deletejob(jobs, pid);
     return;
 }
 
@@ -264,6 +327,15 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    int status;
+    int pid;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        deletejob(jobs, pid);
+    }
+    if (errno != ECHILD) {
+        printf("waitpid error");
+        exit(0);
+    }
     return;
 }
 
@@ -462,39 +534,39 @@ void usage(void)
     exit(1);
 }
 
-/*
- * unix_error - unix-style error routine
- */
-void unix_error(char *msg)
-{
-    fprintf(stdout, "%s: %s\n", msg, strerror(errno));
-    exit(1);
-}
+// /*
+//  * unix_error - unix-style error routine
+//  */
+// void unix_error(char *msg)
+// {
+//     fprintf(stdout, "%s: %s\n", msg, strerror(errno));
+//     exit(1);
+// }
 
-/*
- * app_error - application-style error routine
- */
-void app_error(char *msg)
-{
-    fprintf(stdout, "%s\n", msg);
-    exit(1);
-}
+// /*
+//  * app_error - application-style error routine
+//  */
+// void app_error(char *msg)
+// {
+//     fprintf(stdout, "%s\n", msg);
+//     exit(1);
+// }
 
-/*
- * Signal - wrapper for the sigaction function
- */
-handler_t *Signal(int signum, handler_t *handler) 
-{
-    struct sigaction action, old_action;
+// /*
+//  * Signal - wrapper for the sigaction function
+//  */
+// handler_t *Signal(int signum, handler_t *handler) 
+// {
+//     struct sigaction action, old_action;
 
-    action.sa_handler = handler;  
-    sigemptyset(&action.sa_mask); /* block sigs of type being handled */
-    action.sa_flags = SA_RESTART; /* restart syscalls if possible */
+//     action.sa_handler = handler;  
+//     sigemptyset(&action.sa_mask); /* block sigs of type being handled */
+//     action.sa_flags = SA_RESTART; /* restart syscalls if possible */
 
-    if (sigaction(signum, &action, &old_action) < 0)
-	unix_error("Signal error");
-    return (old_action.sa_handler);
-}
+//     if (sigaction(signum, &action, &old_action) < 0)
+// 	unix_error("Signal error");
+//     return (old_action.sa_handler);
+// }
 
 /*
  * sigquit_handler - The driver program can gracefully terminate the
