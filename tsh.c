@@ -191,23 +191,26 @@ void eval(char *cmdline)
         if ((pid = Fork()) == 0) {
             // Now we can unblock the sig child signal
             Sigprocmask(SIG_SETMASK, &prev_mask, NULL);
+            Setpgid(0, 0);
             // Execute in child process
+            // printf("Execve: %s\n", argv[0]);
             Execve(argv[0], argv, environ);
         }
+
+        // printf("child job, pid %d, execve %s\n", pid, argv[0]);
 
         int state = bg ? BG : FG;
         addjob(jobs, pid, state, cmdline);
 
         if (!bg) {
             waitfg(pid);
-
         } else {
             printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
         }
 
-
         // Now we can unblock the sig child signal
         Sigprocmask(SIG_SETMASK, &prev_mask, NULL);
+
 
     }
     return;
@@ -306,11 +309,20 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-    // sigset_t mask;
+    sigset_t mask, pre_mask;
+    Sigemptyset(&mask);
+    Sigprocmask(SIG_BLOCK, &mask, &pre_mask);
+    Sigdelset(&pre_mask, SIGCLD);
+
+    // Sigsuspend(&pre_mask);
     // Sigemptyset(&mask);
     // Sigsuspend(&mask);
-    Waitpid(pid, NULL, 0);
-    deletejob(jobs, pid);
+
+    while (fgpid(jobs) == pid) {
+        Sigsuspend(&pre_mask);
+    }
+    // printf("getout!!\n");
+    // printf("fgpid %d, pid %d\n", fgpid(jobs), pid);
     return;
 }
 
@@ -329,13 +341,28 @@ void sigchld_handler(int sig)
 {
     int status;
     int pid;
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        deletejob(jobs, pid);
+    // printf("recv a sig child1\n");
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+        // printf("delete a job, pid %d\n", pid);
+        if (WIFSTOPPED(status)) {
+            struct job_t *job = getjobpid(jobs, pid);
+            job->state = ST;
+            printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
+        } else if (WIFEXITED(status)) {
+            // printf("delete a job, pid %d\n", pid);
+            deletejob(jobs, pid);
+        } else if (WIFSIGNALED(status)) {
+            printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+            deletejob(jobs, pid);
+        }
     }
-    if (errno != ECHILD) {
-        printf("waitpid error");
+    // printf("recv a sig child2\n");
+    if (errno != 0 && errno != ECHILD && errno != EINTR) {
+        // printf("waitpid error!!\n");
+        perror("Waitpid error!!");
         exit(0);
     }
+    // printf("finish a sig child\n");
     return;
 }
 
@@ -346,6 +373,9 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    // printf("recv a sig int, pid %d\n", fgpid(jobs));
+    // Kill(fgpid(jobs), SIGKILL);
+    Kill(fgpid(jobs), SIGINT);
     return;
 }
 
@@ -356,6 +386,7 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    Kill(fgpid(jobs), SIGTSTP);
     return;
 }
 
