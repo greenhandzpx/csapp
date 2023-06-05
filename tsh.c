@@ -16,7 +16,7 @@
 #include "csapp.h"
 
 /* Misc manifest constants */
-#define MAXLINE    1024   /* max line size */
+// #define MAXLINE    1024   /* max line size */
 #define MAXARGS     128   /* max args on a command line */
 #define MAXJOBS      16   /* max jobs at any point in time */
 #define MAXJID    1<<16   /* max job ID */
@@ -285,9 +285,10 @@ int builtin_cmd(char **argv)
         listjobs(jobs);
         return 1;
     } else if (strcmp(argv[0], "bg") == 0) {
+        do_bgfg(argv);
         return 1;
-
     } else if (strcmp(argv[0], "fg") == 0) {
+        do_bgfg(argv);
         return 1;
 
     } else {
@@ -301,6 +302,50 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    char err[128];
+    if (strcmp(argv[0], "fg") == 0) {
+        strcpy(err, "fg ");
+    } else {
+        strcpy(err, "bg ");
+    }
+    if (!argv[1]) {
+        sprintf(err + 3, "command requires PID or %%jobid argument\n");
+        printf("%s", err);
+        return;
+    }
+    if (!argv[1][1]) {
+        sprintf(err + 3, "argument must be a PID or %%jobid\n");
+        printf("%s", err);
+        return;
+    }
+    if (!('0' <= argv[1][1] && argv[1][1] <= '9')) {
+        return;
+    }
+    if (argv[1][0] != '%') {
+        int pid = atoi(argv[1]);
+        printf("(%d): No such process\n", pid);
+        return;
+    }
+    int jid = argv[1][1] - '0';
+    struct job_t *job = getjobjid(jobs, jid);
+    if (!job) {
+        printf("%%%d: No such job\n", jid);
+        return;
+    }
+    int pid = job->pid;
+    if (strcmp(argv[0], "fg") == 0) {
+        // fg
+        job->state = FG;
+        // Kill(pid, SIGCONT);
+        killpg(getpgid(pid), SIGCONT);
+        waitfg(pid);
+    } else {
+        // bg
+        job->state = BG;
+        // Kill(pid, SIGCONT);
+        killpg(getpgid(pid), SIGCONT);
+        printf("[%d] (%d) %s", pid2jid(pid), pid, job->cmdline);
+    }
     return;
 }
 
@@ -375,7 +420,8 @@ void sigint_handler(int sig)
 {
     // printf("recv a sig int, pid %d\n", fgpid(jobs));
     // Kill(fgpid(jobs), SIGKILL);
-    Kill(fgpid(jobs), SIGINT);
+    killpg(getpgid(fgpid(jobs)), SIGINT);
+    // Kill(fgpid(jobs), SIGINT);
     return;
 }
 
